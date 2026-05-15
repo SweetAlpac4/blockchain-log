@@ -1,6 +1,7 @@
 import hashlib
 import json
-import sys
+import time
+import subprocess
 from web3 import Web3
 
 # ============ CONFIG ============
@@ -22,8 +23,7 @@ def hash_log(log_line: str) -> bytes:
 def send_to_blockchain(log_hash: bytes, source: str):
     nonce = w3.eth.get_transaction_count(account.address)
     tx = contract.functions.storeLog(
-        log_hash,
-        source
+        log_hash, source
     ).build_transaction({
         'from': account.address,
         'nonce': nonce,
@@ -35,51 +35,43 @@ def send_to_blockchain(log_hash: bytes, source: str):
     w3.eth.wait_for_transaction_receipt(tx_hash)
     return tx_hash.hex()
 
-def save_log(log_line: str):
-    with open('/blockchain-log/logs/submitted_logs.txt', 'a') as f:
-        f.write(log_line + '\n')
+def save_log(line: str):
+    with open('/home/alpaca/blockchain-log/logs/submitted_logs.txt', 'a') as f:
+        f.write(line + '\n')
 
-if __name__ == "__main__":
-    # Mode 1: input dari syslog-ng via stdin
-    if not sys.stdin.isatty():
-        for line in sys.stdin:
-            line = line.strip()
-            if not line:
-                continue
-            log_hash = hash_log(line)
-            tx_hash = send_to_blockchain(log_hash, "syslog-ng")
-            save_log(line)
-            print(f"[OK] Hash: {log_hash.hex()} | TX: {tx_hash}", flush=True)
+print(f"[*] Blockchain Log Watcher started")
+print(f"[*] Connected: {w3.is_connected()}")
+print(f"[*] Monitoring systemd journal for auth/warning events...")
+print(f"[*] Press Ctrl+C to stop")
+print("-" * 60)
 
-    # Mode 2: manual — baca 3 log terakhir dari syslog
-    else:
-        print(f"[*] Connected: {w3.is_connected()}")
-        print(f"[*] Account: {account.address}")
-        print(f"[*] Balance: {w3.from_wei(w3.eth.get_balance(account.address), 'ether')} ETH")
-        print("-" * 60)
+# Monitor systemd journal secara realtime
+proc = subprocess.Popen(
+    ['journalctl', '-f', '-p', 'warning', '--output=short-iso'],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.DEVNULL,
+    text=True
+)
+
+try:
+    for line in proc.stdout:
+        line = line.strip()
+        if not line:
+            continue
+
+        log_hash = hash_log(line)
+        print(f"[+] New log  : {line[:65]}")
+        print(f"    Hash     : {log_hash.hex()}")
 
         try:
-            with open('/var/log/syslog', 'r', errors='ignore') as f:
-                lines = [l.strip() for l in f.readlines() if l.strip()]
-            recent = lines[-3:]
-        except PermissionError:
-            recent = [
-                "May 11 18:00:01 server sshd[1234]: Failed password for root",
-                "May 11 18:00:02 server sshd[1234]: Accepted password for alpaca",
-                "May 11 18:00:03 server sudo: alpaca : COMMAND=/bin/bash",
-            ]
-
-        import os
-        os.makedirs('/home/alpaca/blockchain-log/logs', exist_ok=True)
-
-        for i, line in enumerate(recent):
-            log_hash = hash_log(line)
-            print(f"[{i+1}] Log : {line[:60]}")
-            print(f"     Hash: {log_hash.hex()}")
-            tx_hash = send_to_blockchain(log_hash, "syslog")
-            print(f"     TX  : {tx_hash}")
+            tx_hash = send_to_blockchain(log_hash, "journald")
             save_log(line)
-            print()
+            print(f"    TX       : {tx_hash}")
+            print(f"    Status   : ✅ Tersimpan di blockchain")
+        except Exception as e:
+            print(f"    Status   : ❌ Error: {e}")
+        print()
 
-        total = contract.functions.getTotalLogs().call()
-        print(f"[✓] Total log di blockchain: {total}")
+except KeyboardInterrupt:
+    print("\n[*] Watcher stopped.")
+    proc.terminate()
