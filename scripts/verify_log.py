@@ -20,40 +20,55 @@ def hash_log(log_line: str) -> bytes:
 def verify(log_line: str):
     log_hash = hash_log(log_line)
     is_valid, timestamp = contract.functions.verifyLog(log_hash).call()
-    
+    status = f"✅ VALID — terdaftar di blockchain pada {datetime.fromtimestamp(timestamp)}" if is_valid else "❌ INVALID — log tidak ada di blockchain / telah dimanipulasi!"
     print(f"Log    : {log_line[:70]}")
     print(f"Hash   : {log_hash.hex()}")
-    
-    if is_valid:
-        dt = datetime.fromtimestamp(timestamp)
-        print(f"Status : ✅ VALID — terdaftar di blockchain pada {dt}")
-    else:
-        print(f"Status : ❌ INVALID — log ini tidak ada di blockchain / telah dimanipulasi!")
+    print(f"Status : {status}")
     print("-" * 70)
 
-if __name__ == "__main__":
-    print("=" * 70)
-    print("         BLOCKCHAIN LOG VERIFIER")
-    print("=" * 70)
+def fetch_all_logs_from_blockchain():
+    """Ambil semua log langsung dari blockchain via events"""
+    print("[*] Mengambil semua log dari blockchain...")
+    total = contract.functions.getTotalLogs().call()
+    print(f"[*] Total log di blockchain: {total}")
     print()
 
-    # Baca 3 log terakhir dari syslog (sama seperti yang tadi di-submit)
-    with open('/home/alpaca/blockchain-log/logs/submitted_logs.txt', 'r') as f:    
-        recent = [l.strip() for l in f.readlines() if l.strip()]
+    logs = []
+    for i in range(total):
+        entry = contract.functions.entries(i).call()
+        logs.append({
+            'index': i,
+            'hash': entry[0].hex(),
+            'timestamp': datetime.fromtimestamp(entry[1]),
+            'source': entry[2]
+        })
+    return logs
 
-    print("--- Verifikasi log ASLI ---")
-    print()
-    for line in recent:
-        verify(line)
+print("=" * 70)
+print("         BLOCKCHAIN LOG VERIFIER")
+print("=" * 70)
+print()
 
+# Ambil semua log dari blockchain
+logs = fetch_all_logs_from_blockchain()
+
+print("--- Log yang tersimpan di blockchain ---")
+print()
+for log in logs[-5:]:  # tampilkan 5 terakhir
+    print(f"  [{log['index']}] Hash     : {log['hash'][:32]}...")
+    print(f"       Timestamp : {log['timestamp']}")
+    print(f"       Source    : {log['source']}")
     print()
-    print("--- Simulasi log yang DIMANIPULASI ---")
-    print()
-    # Log yang sama tapi diubah sedikit (simulasi penyerang edit log)
-    tampered = [
-        recent[0] + " [EDITED BY ATTACKER]",
-        recent[1].replace("alpaca", "hacker"),
-        recent[2].replace("COMMAND=/bin/bash", "COMMAND=/bin/rm -rf /"),
-    ]
-    for line in tampered:
-        verify(line)
+
+# Verifikasi log spesifik
+print("=" * 70)
+print("--- Verifikasi log CRITICAL (serangan tadi) ---")
+print()
+
+test_logs = [
+    "2026-05-16T12:35:58+07:00 alpaca-Aspire-AL14-31P sshd[10859]: CRITICAL: Root login attempt from 192.168.1.100",
+    "2026-05-16T12:35:58+07:00 alpaca-Aspire-AL14-31P sshd[10859]: CRITICAL: Root login attempt from 10.0.0.1 [EDITED BY ATTACKER]",
+]
+
+for log in test_logs:
+    verify(log)

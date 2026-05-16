@@ -47,7 +47,7 @@ print("-" * 60)
 
 # Monitor systemd journal secara realtime
 proc = subprocess.Popen(
-    ['journalctl', '-f', '-p', 'warning', '--output=short-iso'],
+    ['journalctl', '-f', '--output=short-iso'],
     stdout=subprocess.PIPE,
     stderr=subprocess.DEVNULL,
     text=True
